@@ -16,12 +16,14 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <signal.h>
 #include <unistd.h>
 #include <wayland-client-protocol.h>
 #include <gbm.h>
 #include <fcntl.h>
 #include <xf86drm.h>
+#include <errno.h>
 
 #include "frame-writer.hpp"
 #include "buffer-pool.hpp"
@@ -691,6 +693,37 @@ static bool user_specified_overwrite(const std::string& filename) {
     return true;
 }
 
+
+std::string get_directory(const std::string& filepath) {
+    size_t pos = filepath.find_last_of('/');
+    return (pos == std::string::npos) ? "." : filepath.substr(0, pos);
+}
+
+bool ensure_directory_exists(const std::string& filepath) {
+    size_t pos = 0;
+    std::string path = get_directory(filepath);
+    do {
+        pos = path.find('/', pos + 1);
+        std::string subdir = path.substr(0, pos);
+
+        struct stat st;
+        if (stat(subdir.c_str(), &st) != 0) {
+            // Directory does not exist, try to create it
+            if (mkdir(subdir.c_str(), 0755) != 0 && errno != EEXIST) {
+                std::cerr << "Failed to create directory: " << subdir
+                          << " (" << strerror(errno) << ")" << std::endl;
+                return false;
+            }
+        } else if (!S_ISDIR(st.st_mode)) {
+            // Path exists but is not a directory
+            std::cerr << "Path exists but is not a directory: " << subdir << std::endl;
+            return false;
+        }
+    } while (pos != std::string::npos);
+
+    return true;
+}
+
 static void check_has_protos()
 {
     if (shm == NULL) {
@@ -1055,6 +1088,12 @@ int main(int argc, char *argv[])
                 params.file = optarg;
                 if (params.file.find('%') != std::string::npos) { // Check for date format specifiers
                     params.file = generate_filename_with_date_format(params.file);
+                }
+                {
+                    if (!ensure_directory_exists(params.file)) {
+                        std::cerr << "Failed to ensure directory exists: " << params.file << std::endl;
+                        return EXIT_FAILURE;
+                    }
                 }
                 break;
 
