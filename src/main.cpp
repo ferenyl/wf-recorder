@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 199309L
 #include <iostream>
 #include <optional>
+#include <ctime>
 
 #include <list>
 #include <string>
@@ -676,21 +677,17 @@ void handle_graceful_termination(int)
     exit_main_loop = true;
 }
 
-static bool user_specified_overwrite(std::string filename)
-{
-    struct stat buffer;   
-    if (stat (filename.c_str(), &buffer) == 0 && !S_ISCHR(buffer.st_mode))
-    {
+static bool user_specified_overwrite(const std::string& filename) {
+    struct stat buffer;
+    if (stat(filename.c_str(), &buffer) == 0 && !S_ISCHR(buffer.st_mode)) {
         std::string input;
         std::cerr << "Output file \"" << filename << "\" exists. Overwrite? Y/n: ";
         std::getline(std::cin, input);
-        if (input.size() && input[0] != 'Y' && input[0] != 'y')
-        {
+        if (!input.empty() && input[0] != 'Y' && input[0] != 'y') {
             std::cerr << "Use -f to specify the file name." << std::endl;
             return false;
-	}
+        }
     }
-
     return true;
 }
 
@@ -989,6 +986,21 @@ static void parse_codec_opts(std::map<std::string, std::string>& options, const 
     }
 }
 
+std::string generate_filename_with_date_format(const std::string& format) {
+    constexpr size_t MAX_FILENAME_LENGTH = 1024;
+    char buffer[MAX_FILENAME_LENGTH];
+
+    std::time_t now = std::time(nullptr);
+    std::tm* local_time = std::localtime(&now);
+
+    if (std::strftime(buffer, sizeof(buffer), format.c_str(), local_time) == 0) {
+        std::cerr << "Error: Date format string is too long or invalid." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return std::string(buffer);
+}
+
 int main(int argc, char *argv[])
 {
     FrameWriterParams params = FrameWriterParams(exit_main_loop);
@@ -1041,6 +1053,9 @@ int main(int argc, char *argv[])
         {
             case 'f':
                 params.file = optarg;
+                if (params.file.find('%') != std::string::npos) { // Check for date format specifiers
+                    params.file = generate_filename_with_date_format(params.file);
+                }
                 break;
 
             case 'F':
